@@ -1,8 +1,8 @@
 {
   "name": "tecnicas-prueba-software",
   "version": "0.0.1",
-  "description": "A Quasar Project",
-  "productName": "Quasar App",
+  "description": "Demos interactivas de técnicas de prueba de software",
+  "productName": "Técnicas de Prueba de Software",
   "author": "Jonathanmg1415 <53263709+Jonathanmg1415@users.noreply.github.com>",
   "type": "module",
   "private": true,
