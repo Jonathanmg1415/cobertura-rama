@@ -23,7 +23,11 @@
               v-for="line in codeLines"
               :key="line.num"
               class="code-line"
-              :class="{ 'code-line--active': line.num === highlightedLine }"
+              :class="{
+                'code-line--active': highlightedLines.includes(line.num),
+                'code-line--current': line.num === currentLine,
+                'code-line--hovered': line.num === hoveredLine,
+              }"
             ><span class="line-num">{{ line.num }}</span><span class="line-code" v-html="line.html"></span></div
           ></code></pre>
         </section>
@@ -80,6 +84,46 @@
         </section>
       </div>
 
+      <!-- Flujo de ejecución de la última prueba -->
+      <section v-if="executionPath.length" class="panel flow-panel">
+        <h2 class="panel-title-lg">Flujo de la última prueba ejecutada</h2>
+        <p class="flow-hint">
+          Pasa el cursor sobre un paso para ver la línea de código correspondiente.
+        </p>
+        <div class="flow-track">
+          <template v-for="(step, i) in executionPath" :key="step.branchId">
+            <div
+              class="flow-step"
+              :class="[
+                step.valor === 'Verdadero' ? 'flow-step--stop' : 'flow-step--pass',
+                {
+                  'flow-step--pending': i > currentStepIndex,
+                  'flow-step--current': i === currentStepIndex,
+                },
+              ]"
+              @mouseenter="hoveredLine = step.line"
+              @mouseleave="hoveredLine = null"
+            >
+              <span class="flow-decision">{{ step.decision }}</span>
+              <span class="flow-valor">{{ step.valor }}</span>
+            </div>
+            <span v-if="i < executionPath.length - 1" class="flow-arrow">&rarr;</span>
+          </template>
+          <span class="flow-arrow">&rarr;</span>
+          <div
+            class="flow-step flow-step--result"
+            :class="[
+              resultadoClass,
+              { 'flow-step--pending': currentStepIndex < executionPath.length },
+            ]"
+            @mouseenter="hoveredLine = resultLine"
+            @mouseleave="hoveredLine = null"
+          >
+            {{ resultado }}
+          </div>
+        </div>
+      </section>
+
       <!-- Matriz de cobertura -->
       <section class="panel coverage-panel">
         <div class="coverage-header">
@@ -99,27 +143,41 @@
         <p class="progress-label">
           {{ coveredCount }} / {{ branches.length }} ramas cubiertas ({{ coveragePercent }}%)
         </p>
+        <p class="progress-note">
+          3 decisiones secuenciales &rarr; 6 ramas (verdadero/falso), pero solo 4 casos de prueba
+          bastan para cubrirlas todas: cada caso atraviesa una decisión nueva y, de paso, la rama
+          "falsa" de las anteriores.
+        </p>
 
         <table class="coverage-table">
           <thead>
             <tr>
               <th>Rama</th>
-              <th>Condición</th>
-              <th>Resultado esperado</th>
+              <th>Decisión</th>
+              <th>Valor</th>
+              <th>Significado</th>
               <th>Estado</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(b, i) in branches" :key="b.id" :class="{ covered: b.covered }">
+            <tr
+              v-for="(b, i) in branches"
+              :key="b.id"
+              :class="{ covered: b.covered, 'branch-current': lastHitBranchIds.includes(b.id) }"
+            >
               <td>{{ i + 1 }}</td>
               <td>
-                <code>{{ b.condicion }}</code>
+                <code>{{ b.decision }}</code>
               </td>
-              <td>{{ b.resultado }}</td>
+              <td>{{ b.valor }}</td>
+              <td>{{ b.desc }}</td>
               <td>
                 <span class="badge" :class="b.covered ? 'badge-ok' : 'badge-pending'">
                   {{ b.covered ? 'Cubierta' : 'Pendiente' }}
                 </span>
+                <span v-if="lastHitBranchIds.includes(b.id)" class="badge badge-current"
+                  >Última prueba</span
+                >
               </td>
             </tr>
           </tbody>
@@ -146,7 +204,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onUnmounted } from 'vue'
 
 const rawCodeLines = [
   'function retirar(monto, saldo, cuentaBloqueada) {',
@@ -179,21 +237,82 @@ const saldo = ref(500)
 const estadoCuenta = ref('Activa')
 const resultado = ref('')
 const resultadoClass = ref('')
-const highlightedLine = ref(null)
+const pathLines = ref([])
+const currentStepIndex = ref(-1)
+const hoveredLine = ref(null)
+const resultLine = ref(null)
+const executionPath = ref([])
+const lastHitBranchIds = ref([])
+
+const highlightedLines = computed(() => pathLines.value.slice(0, currentStepIndex.value + 1))
+const currentLine = computed(() =>
+  currentStepIndex.value >= 0 ? pathLines.value[currentStepIndex.value] : null,
+)
+
+const STEP_DELAY_MS = 900
+let playbackTimer = null
+
+function playSequence(lines) {
+  if (playbackTimer) clearInterval(playbackTimer)
+  pathLines.value = lines
+  currentStepIndex.value = 0
+  let i = 0
+  playbackTimer = setInterval(() => {
+    i++
+    if (i >= lines.length) {
+      clearInterval(playbackTimer)
+      playbackTimer = null
+      return
+    }
+    currentStepIndex.value = i
+  }, STEP_DELAY_MS)
+}
+
+onUnmounted(() => {
+  if (playbackTimer) clearInterval(playbackTimer)
+})
 
 const branches = reactive([
-  { id: 'r1', condicion: 'monto <= 0', resultado: 'Error: monto inválido', covered: false },
   {
-    id: 'r2',
-    condicion: 'cuentaBloqueada === true',
-    resultado: 'Error: cuenta bloqueada',
+    id: 'd1t',
+    decision: 'D1: monto ≤ 0',
+    valor: 'Verdadero',
+    desc: 'Monto inválido',
     covered: false,
   },
-  { id: 'r3', condicion: 'monto > saldo', resultado: 'Error: saldo insuficiente', covered: false },
   {
-    id: 'r4',
-    condicion: 'ninguna condición anterior',
-    resultado: 'Retiro exitoso',
+    id: 'd1f',
+    decision: 'D1: monto ≤ 0',
+    valor: 'Falso',
+    desc: 'Monto válido, continúa',
+    covered: false,
+  },
+  {
+    id: 'd2t',
+    decision: 'D2: cuentaBloqueada',
+    valor: 'Verdadero',
+    desc: 'Cuenta bloqueada',
+    covered: false,
+  },
+  {
+    id: 'd2f',
+    decision: 'D2: cuentaBloqueada',
+    valor: 'Falso',
+    desc: 'Cuenta activa, continúa',
+    covered: false,
+  },
+  {
+    id: 'd3t',
+    decision: 'D3: monto > saldo',
+    valor: 'Verdadero',
+    desc: 'Saldo insuficiente',
+    covered: false,
+  },
+  {
+    id: 'd3f',
+    decision: 'D3: monto > saldo',
+    valor: 'Falso',
+    desc: 'Retiro exitoso',
     covered: false,
   },
 ])
@@ -202,30 +321,42 @@ const coveredCount = computed(() => branches.filter((b) => b.covered).length)
 const coveragePercent = computed(() => Math.round((coveredCount.value / branches.length) * 100))
 
 function retirar(montoVal, saldoVal, cuentaBloqueada) {
+  const path = []
+
   if (montoVal <= 0) {
     branches[0].covered = true
-    highlightedLine.value = 3
-    return { mensaje: 'Error: monto inválido', tipo: 'error' }
+    path.push({ decision: 'D1: monto ≤ 0', valor: 'Verdadero', branchId: 'd1t', line: 2 })
+    return { mensaje: 'Error: monto inválido', tipo: 'error', path, resultLine: 3 }
   }
+  branches[1].covered = true
+  path.push({ decision: 'D1: monto ≤ 0', valor: 'Falso', branchId: 'd1f', line: 2 })
+
   if (cuentaBloqueada) {
-    branches[1].covered = true
-    highlightedLine.value = 6
-    return { mensaje: 'Error: cuenta bloqueada', tipo: 'error' }
-  }
-  if (montoVal > saldoVal) {
     branches[2].covered = true
-    highlightedLine.value = 9
-    return { mensaje: 'Error: saldo insuficiente', tipo: 'error' }
+    path.push({ decision: 'D2: cuentaBloqueada', valor: 'Verdadero', branchId: 'd2t', line: 5 })
+    return { mensaje: 'Error: cuenta bloqueada', tipo: 'error', path, resultLine: 6 }
   }
   branches[3].covered = true
-  highlightedLine.value = 11
-  return { mensaje: 'Retiro exitoso', tipo: 'ok' }
+  path.push({ decision: 'D2: cuentaBloqueada', valor: 'Falso', branchId: 'd2f', line: 5 })
+
+  if (montoVal > saldoVal) {
+    branches[4].covered = true
+    path.push({ decision: 'D3: monto > saldo', valor: 'Verdadero', branchId: 'd3t', line: 8 })
+    return { mensaje: 'Error: saldo insuficiente', tipo: 'error', path, resultLine: 9 }
+  }
+  branches[5].covered = true
+  path.push({ decision: 'D3: monto > saldo', valor: 'Falso', branchId: 'd3f', line: 8 })
+  return { mensaje: 'Retiro exitoso', tipo: 'ok', path, resultLine: 11 }
 }
 
 function ejecutar(montoVal, saldoVal, bloqueada) {
-  const { mensaje, tipo } = retirar(montoVal, saldoVal, bloqueada)
+  const { mensaje, tipo, path, resultLine: endLine } = retirar(montoVal, saldoVal, bloqueada)
   resultado.value = mensaje
   resultadoClass.value = tipo === 'ok' ? 'resultado-ok' : 'resultado-error'
+  executionPath.value = path
+  lastHitBranchIds.value = path.map((step) => step.branchId)
+  resultLine.value = endLine
+  playSequence([...path.map((step) => step.line), endLine])
 }
 
 function ejecutarPrueba() {
@@ -252,7 +383,14 @@ function reiniciarCobertura() {
   })
   resultado.value = ''
   resultadoClass.value = ''
-  highlightedLine.value = null
+  if (playbackTimer) clearInterval(playbackTimer)
+  playbackTimer = null
+  pathLines.value = []
+  currentStepIndex.value = -1
+  hoveredLine.value = null
+  resultLine.value = null
+  executionPath.value = []
+  lastHitBranchIds.value = []
 }
 
 const explainCards = [
@@ -408,6 +546,26 @@ const explainCards = [
   box-shadow: inset 3px 0 0 #764ba2;
 }
 
+.code-line--hovered {
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: inset 3px 0 0 #fff;
+}
+
+.code-line--current {
+  animation: linePulse 0.9s ease infinite;
+  box-shadow: inset 4px 0 0 #fff;
+}
+
+@keyframes linePulse {
+  0%,
+  100% {
+    background-color: rgba(102, 126, 234, 0.28);
+  }
+  50% {
+    background-color: rgba(102, 126, 234, 0.55);
+  }
+}
+
 .line-num {
   color: #565672;
   width: 28px;
@@ -503,6 +661,94 @@ const explainCards = [
   color: #c53030;
 }
 
+/* Flow trace */
+.flow-panel {
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.flow-track {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.flow-hint {
+  font-size: 0.8rem;
+  color: #999;
+  margin: -8px 0 14px;
+}
+
+.flow-step {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  font-size: 0.82rem;
+  cursor: default;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+  animation: fadeIn 0.4s ease forwards;
+}
+
+.flow-step:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.flow-step--pending {
+  opacity: 0.25;
+}
+
+.flow-step--current {
+  animation: stepPulse 0.9s ease infinite;
+}
+
+@keyframes stepPulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.06);
+  }
+}
+
+.flow-step--pass {
+  background: #eef5ff;
+  border-color: #90b4f5;
+  color: #2451a3;
+}
+
+.flow-step--stop {
+  background: #fff1e8;
+  border-color: #f0a26f;
+  color: #a35a1a;
+}
+
+.flow-decision {
+  font-weight: 700;
+}
+
+.flow-valor {
+  font-size: 0.76rem;
+  opacity: 0.85;
+}
+
+.flow-step--result {
+  font-weight: 700;
+  padding: 8px 16px;
+}
+
+.flow-arrow {
+  color: #aaa;
+  font-weight: 700;
+}
+
 /* Coverage panel */
 .coverage-panel {
   padding: 24px;
@@ -540,7 +786,14 @@ const explainCards = [
 .progress-label {
   font-size: 0.85rem;
   color: #666;
-  margin: 8px 0 20px;
+  margin: 8px 0 4px;
+}
+
+.progress-note {
+  font-size: 0.8rem;
+  color: #888;
+  line-height: 1.5;
+  margin: 0 0 20px;
 }
 
 .coverage-table {
@@ -585,6 +838,17 @@ const explainCards = [
 .badge-pending {
   background: #eee;
   color: #888;
+}
+
+.badge-current {
+  margin-left: 6px;
+  background: #764ba2;
+  color: white;
+}
+
+.coverage-table tr.branch-current {
+  box-shadow: inset 4px 0 0 #764ba2;
+  font-weight: 600;
 }
 
 /* Explanation cards */

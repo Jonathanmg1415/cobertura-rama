@@ -56,7 +56,7 @@ const techniques = [
     route: '/flujo-datos',
     icon: 'device_hub',
     color: 'linear-gradient(135deg, #43cea2 0%, #185a9d 100%)',
-    available: false,
+    available: true,
   },
   {
     title: 'Pruebas Exploratorias',
@@ -65,7 +65,7 @@ const techniques = [
     route: '/exploracion',
     icon: 'travel_explore',
     color: 'linear-gradient(135deg, #f7971e 0%, #ffd200 100%)',
-    available: false,
+    available: true,
   },
 ]
 </script>
